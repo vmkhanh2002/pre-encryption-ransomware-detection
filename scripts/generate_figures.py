@@ -120,7 +120,7 @@ def fig_adversarial_cascade():
     colors = [COLORS['teal'], COLORS['teal'], COLORS['teal'],
               COLORS['orange'], COLORS['blue'], COLORS['red'], COLORS['red']]
 
-    fig, ax = plt.subplots(figsize=(7.6, 2.9))
+    fig, ax = plt.subplots(figsize=(8.4, 3.3))
     x = np.arange(len(stages))
     ax.bar(x, values, color=colors, edgecolor='white', linewidth=0.5, width=0.65)
     for xi, v in zip(x, values):
@@ -143,7 +143,9 @@ def fig_adversarial_cascade():
         mpatches.Patch(color=COLORS['blue'], label='White-box, fused (single-channel attack)'),
         mpatches.Patch(color=COLORS['red'], label='White-box, fused (joint two-channel attack)'),
     ]
-    ax.legend(handles=legend_handles, loc='upper right', fontsize=7.8, framealpha=0.9)
+    # below the axes, so no bar label is hidden
+    ax.legend(handles=legend_handles, loc='upper center', bbox_to_anchor=(0.5, -0.30),
+              ncol=2, fontsize=7.8, frameon=False)
 
     plt.tight_layout()
     fig.savefig(os.path.join(OUT_DIR, 'fig_adversarial_cascade.pdf'))

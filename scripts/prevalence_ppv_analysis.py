@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(next(p / "src" for p in Path(__file__).resolve().parents
                             if (p / "src" / "config.py").is_file())))
-from config import RESULTS_DIR  # noqa: E402
+from config import RESULTS_DIR, fused_result_key  # noqa: E402
 import json
 from pathlib import Path
 
@@ -61,13 +61,9 @@ def main():
     models = json.load(open(MODELS_JSON))
     fusion = json.load(open(FUSION_JSON))
 
-    # `learned_fusion.json`'s reported strategy today is meta_K3 (the "best
-    # of K in {1,2,3}" pick this repo's item-1 fix will revisit separately;
-    # this script re-reads whichever key is current, so rerunning it after
-    # that fix picks up the new K automatically without editing this file).
-    fused_key = "meta_K3" if "meta_K3" in fusion["summary"] else next(
-        k for k in fusion["summary"] if k.startswith("meta_K")
-    )
+    # The fused system as reported in the paper's Table 3 (calibration on half
+    # of the benign test pool, component count selected by BIC).
+    fused_key = fused_result_key("split75")
 
     channels = {
         "MLRan alone":       channel_operating_points(models["ano_mlran"]["GaussianMixture"]),

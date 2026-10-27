@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(next(p / "src" for p in Path(__file__).resolve().parents
                             if (p / "src" / "config.py").is_file())))
-from config import RESULTS_DIR, SEEDS, K_MLRAN, COV_MLRAN, REG_COVAR, N_INIT  # noqa: E402
+from config import COV_MLRAN, K_MLRAN, N_INIT, REG_COVAR, RESULTS_DIR, SEEDS, TEST_SIZE  # noqa: E402
 import os, sys, hashlib, json
 import numpy as np
 from scipy.special import logsumexp
@@ -31,7 +31,7 @@ uniq_groups = group_ids.unique()
 res = {'gmm_diag': [], 'bernoulli': []}
 
 for seed in SEEDS:
-    tr_g, te_g = train_test_split(uniq_groups, test_size=0.2, random_state=seed)
+    tr_g, te_g = train_test_split(uniq_groups, test_size=TEST_SIZE, random_state=seed)
     mtr = group_ids.isin(set(tr_g)).to_numpy()
     Xtr, ytr = X[mtr], y[mtr]
     Xte, yte = X[~mtr], y[~mtr]

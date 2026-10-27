@@ -6,7 +6,7 @@ value at this operating point is not meaningful for these test-set sizes
 (Section 4.2).
 """
 
-from config import MLRAN_CSV, RANSMAP_CSV, RESULTS_DIR, SEEDS, CANONICAL_FAMILIES, K_MLRAN, K_RANSMAP  # noqa: E402
+from config import CANONICAL_FAMILIES, K_MLRAN, K_RANSMAP, MLRAN_CSV, RANSMAP_CSV, RESULTS_DIR, SEEDS, TEST_SIZE  # noqa: E402
 import hashlib
 import json
 import numpy as np
@@ -25,10 +25,8 @@ OUTPUT_DIR = RESULTS_DIR
 
 MLRAN_EXCLUDE = {"label", "family", "sample_id", "sha256", "split", "STRING:labels", "dataset"}
 RANSMAP_EXCLUDE = {"label", "family", "trace_path", "dataset"}
-MLRAN_FAMILY_MAP = {"Conti": "conti", "Ryuk": "ryuk", "LockBit": "lockbit",
-                     "REvil": "revil", "WannaCry": "wannacry"}
-RANSMAP_FAMILY_MAP = {"Conti": "Conti", "Ryuk": "Ryuk", "LockBit": "LockBit",
-                       "REvil": "REvil", "WannaCry": "WannaCry"}
+MLRAN_FAMILY_MAP = {f: f.lower() for f in CANONICAL_FAMILIES}
+RANSMAP_FAMILY_MAP = {f: f for f in CANONICAL_FAMILIES}
 
 
 def score(gm, X):
@@ -69,13 +67,13 @@ def main():
     for seed in SEEDS:
         rng_b = np.random.default_rng(np.random.SeedSequence(seed).spawn(1)[0])
 
-        tr_gids, te_gids = train_test_split(m_unique_gids, test_size=0.2, random_state=seed)
+        tr_gids, te_gids = train_test_split(m_unique_gids, test_size=TEST_SIZE, random_state=seed)
         m_tr_mask = m_ben["_gid"].isin(set(tr_gids))
         Xmb_tr = m_ben[m_tr_mask][mfc].fillna(0.0).values
         Xmb_te = m_ben[~m_tr_mask][mfc].fillna(0.0).values
 
         Xrb_tr_raw, Xrb_te_raw = train_test_split(
-            r_ben[rfc].fillna(0.0).values, test_size=0.2,
+            r_ben[rfc].fillna(0.0).values, test_size=TEST_SIZE,
             random_state=seed, stratify=r_ben["family"].values)
         sc = StandardScaler().fit(Xrb_tr_raw)
         Xrb_tr, Xrb_te = sc.transform(Xrb_tr_raw), sc.transform(Xrb_te_raw)

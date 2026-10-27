@@ -20,26 +20,34 @@ feasibility study, not a measurement of a deployed detector.
 |---|---|
 | MLRan channel alone, AUC (64 families) | 0.9743 |
 | RanSMAP channel alone, AUC (14 families) | 0.9960 |
-| Fused, macro AUC (5 canonical families, LOFO) | 0.9988 |
-| RanSMAP alone on the same benchmark | 0.9978 (difference not significant, p = 0.505) |
-| TPR @ 1% FPR, fused vs. RanSMAP alone | 91.5% vs. 95.2% |
-| Deploy-95 threshold, fused | 100% TPR at 6.0% macro FPR |
+| Fused, macro AUC (5 canonical families, LOFO) | 0.9989 |
+| RanSMAP alone on the same benchmark | 0.9978 (all 5 families favour fusion; exact sign-flip test p = 0.0625, the smallest value 5 families allow) |
+| TPR @ 1% FPR, fused vs. RanSMAP alone | 95.5% vs. 95.2% |
+| Deploy-95 threshold, fused | 99.9% TPR at 9.5% macro FPR (3.5% with out-of-fold calibration) |
 
-Fusion is **not** an accuracy gain on this saturated benchmark. Its measured
-effect is under attack:
+Fusion is **not** a significant accuracy gain on this saturated benchmark.
+Its measured effect is under attack:
 
 | Attack (feature space) | Fused macro AUC |
 |---|---|
-| None | 0.999 |
-| Zero-knowledge throttling, up to 100x slowdown | never evades (>= 0.9989) |
-| White-box on the I/O channel alone (that channel: 0.41) | 0.791; Deploy-95 TPR 99.9% -> 45.4% |
-| Joint attack on both channels, static heuristic | 0.326 |
-| Joint attack on both channels, coordinate descent | 0.416 |
+| None | 0.998 |
+| Zero-knowledge throttling, up to 100x slowdown | never evades (I/O channel AUC >= 0.9978) |
+| White-box on the I/O channel alone (that channel: 0.51) | 0.803; Deploy-95 TPR 99.7% -> 50.8% |
+| Joint attack on both channels, static heuristic | 0.184 |
+| Joint attack on both channels, coordinate descent | 0.185 |
 
 The joint-attack values come from heuristic searches, not a certified worst
 case. All attacks except throttling perturb feature vectors, not executable
 ransomware. A Deploy-95 threshold does not transfer to an unseen CPU
-(false-positive rate 10.0-36.6%).
+(false-positive rate 8.0-26.6%).
+
+**Correction (2026-10-27).** The first public version of this code had
+three errors that affected the fused and adversarial results: Mahalanobis
+distance used the covariance instead of its inverse; the fusion and attack
+scripts did not standardize the RanSMAP features, although the paper says
+they do; and the meta-GMM calibration resampled 75 scores into 200 with
+replacement. The camera-ready paper reports the corrected numbers above.
+The single-channel results (Table 2) were not affected.
 
 ## Layout
 
@@ -67,7 +75,7 @@ scripts/
   near_duplicate_leakage.py, nested_k_selection.py,
   bootstrap_stability_final.py, bernoulli_vs_gmm.py      robustness checks
   generate_figures.py            figures, read from the result files
-  build_ransmap_features*.py     feature extraction from raw RanSMAP traces
+  build_ransmap_features.py      feature extraction from the RanSMAP archive
 data/processed/                  place the two feature CSVs here (not in git)
 ```
 
@@ -135,7 +143,7 @@ variables:
 | `PERD_RANSMAP_CSV` | `data/processed/ransmap_analysis_features.csv` |
 | `PERD_RESULTS_DIR` | `experiments/ano_baseline/` |
 | `PERD_FIGURES_DIR` | `figures/` |
-| `RANSMAP_RAW_DIR`, `RANSMAP_KAGGLE_ZIP` | required only for feature extraction |
+| `RANSMAP_KAGGLE_ZIP` | required only for feature extraction |
 
 ## Citation
 

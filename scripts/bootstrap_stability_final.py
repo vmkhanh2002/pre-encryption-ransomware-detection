@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(next(p / "src" for p in Path(__file__).resolve().parents
                             if (p / "src" / "config.py").is_file())))
-from config import RESULTS_DIR, SEEDS, REG_COVAR  # noqa: E402
+from config import REG_COVAR, RESULTS_DIR, SEEDS, TEST_SIZE  # noqa: E402
 import os, sys, hashlib, json
 import numpy as np
 from sklearn.mixture import GaussianMixture
@@ -40,7 +40,7 @@ for seed in SEEDS:
     ghash = df[fm] if False else None
     groups = df[feat_cols].astype(str).agg('|'.join, axis=1).apply(
         lambda s: hashlib.md5(s.encode()).hexdigest())
-    tr_g, te_g = train_test_split(groups.unique(), test_size=0.2, random_state=seed)
+    tr_g, te_g = train_test_split(groups.unique(), test_size=TEST_SIZE, random_state=seed)
     mtr = groups.isin(set(tr_g)).to_numpy()
     Xb = X_all[mtr & (y_all == 0)]
     Xte = X_all[~mtr]

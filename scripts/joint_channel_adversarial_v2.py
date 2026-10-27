@@ -23,78 +23,64 @@ This is still a heuristic local search, not a certified worst case
 is not searched exhaustively). Both v1 and v2 results are reported
 (paper, Section 4.2).
 """
+import hashlib
+import json
+import numpy as np
+import pandas as pd
+from sklearn.mixture import GaussianMixture
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score
 import sys
 from pathlib import Path
 sys.path.insert(0, str(next(p / "src" for p in Path(__file__).resolve().parents
                             if (p / "src" / "config.py").is_file())))
-from config import MLRAN_CSV, RESULTS_DIR, SEEDS, K_MLRAN, K_RANSMAP, COV_RANSMAP, REG_COVAR, N_INIT, META_REG_COVAR, selected_meta_k  # noqa: E402
-import os, json, hashlib
-import sys
-import numpy as np
-import pandas as pd
-from pathlib import Path
-from sklearn.mixture import GaussianMixture
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score
-from utils import load_ransmap, fit_gm, minmax_norm
+from config import CANONICAL_FAMILIES, K_MLRAN, K_RANSMAP, META_REG_COVAR, N_INIT, REG_COVAR, RESULTS_DIR, SEEDS, TEST_SIZE, selected_meta_k  # noqa: E402
+from utils import MLRAN_PATH, MLRAN_EXCLUDE, load_ransmap_clean, fit_gm, minmax_norm, mahal_sq_to_centers, oof_benign_norm_scores_mlran, oof_benign_norm_scores_ransmap  # noqa: E402
 
-MLRAN_PATH = MLRAN_CSV
-OUT = RESULTS_DIR / 'joint_channel_adversarial_v2.json'
-CANONICAL = ['Conti', 'Ryuk', 'LockBit', 'REvil', 'WannaCry']
-MLRAN_EXCLUDE = {"label", "family", "sample_id", "sha256", "split", "STRING:labels", "dataset"}
-MLRAN_FAMILY_MAP = {"Conti": "conti", "Ryuk": "ryuk", "LockBit": "lockbit",
-                     "REvil": "revil", "WannaCry": "wannacry"}
+OUT = RESULTS_DIR / "joint_channel_adversarial_v2.json"
+CANONICAL = CANONICAL_FAMILIES
+MLRAN_FAMILY_MAP = {f: f.lower() for f in CANONICAL_FAMILIES}
 META_K = selected_meta_k()
 
-N_ROUNDS = 60                 # each round = one RanSMAP re-optimization + one candidate MLRan flip
+N_ROUNDS = 60
 REPORT_ROUNDS = [0, 5, 10, 20, 40, 60]
 RANSMAP_ALPHAS = np.linspace(0, 1, 41)
 
-df_r, feat_cols = load_ransmap()
-Xr = df_r[feat_cols].to_numpy(dtype=np.float64)
-fam_r = df_r['family'].to_numpy()
-is_benign_r = df_r['label'].to_numpy() == 0
+df_r, feat_cols = load_ransmap_clean(drop_zero_var=True)
+Xr_raw = df_r[feat_cols].fillna(0.0).to_numpy(dtype=np.float64)
+fam_r = df_r["family"].to_numpy()
+is_benign_r = df_r["label"].to_numpy() == 0
 
 mlran = pd.read_csv(MLRAN_PATH, index_col=0)
 mfc = [c for c in mlran.columns if c not in MLRAN_EXCLUDE]
-m_ben_raw = mlran[mlran['label'] == 0].reset_index(drop=True)
-m_gids = np.array([hashlib.md5(row.astype(np.float32).tobytes()).hexdigest()
-                   for row in m_ben_raw[mfc].fillna(0).values])
-m_ben = m_ben_raw.copy(); m_ben['_gid'] = m_gids
+m_ben_raw = mlran[mlran["label"] == 0].reset_index(drop=True)
+m_gids = np.array([
+    hashlib.md5(row.astype(np.float32).tobytes()).hexdigest()
+    for row in m_ben_raw[mfc].fillna(0).values
+])
+m_ben = m_ben_raw.copy()
+m_ben["_gid"] = m_gids
 m_unique_gids = np.unique(m_gids)
-m_mal = {f: mlran[mlran['family'] == a].reset_index(drop=True)
-          for f, a in MLRAN_FAMILY_MAP.items()}
+m_mal = {
+    f: mlran[mlran["family"] == a].reset_index(drop=True)
+    for f, a in MLRAN_FAMILY_MAP.items()
+}
 
 
 def nll(gm, Xq):
     return -gm.score_samples(Xq)
 
 
-def pair(a, b, rng, n):
+def pair_no_inflate(a, b, rng, n):
     ia = rng.choice(len(a), n, replace=(len(a) < n))
     ib = rng.choice(len(b), n, replace=(len(b) < n))
     return a[ia], b[ib]
 
 
-def split_half(arr, rng):
-    idx = rng.permutation(len(arr))
-    h = len(arr) // 2
-    return arr[idx[:h]], arr[idx[h:]]
-
-
-def mahal_to_centers_full(Xq, mus, covs):
-    D = np.empty((len(Xq), len(mus)))
-    for k in range(len(mus)):
-        diff = Xq - mus[k]
-        D[:, k] = np.einsum('ij,jk,ik->i', diff, covs[k], diff)
-    return D
-
-
-def coordinate_descent_joint(gm_m, sm_tr, X_m0, gm_r, sr_tr, X_r0, T_mode, meta, n_rounds, report_rounds):
-    """Alternating coordinate descent on the fused meta-GMM score for a
-    batch of bootstrap-PAIRED (MLRan, RanSMAP) malware samples sharing a
-    row index. Returns {round: fused_score_array} at each requested
-    checkpoint, plus final (x_m, alpha) state."""
+def coordinate_descent_joint(
+    gm_m, sm_tr, X_m0, gm_r, sr_tr, X_r0, T_mode, meta, n_rounds, report_rounds
+):
     n = len(X_m0)
     x_m = X_m0.copy()
     flipped = np.zeros_like(x_m, dtype=bool)
@@ -115,7 +101,6 @@ def coordinate_descent_joint(gm_m, sm_tr, X_m0, gm_r, sr_tr, X_r0, T_mode, meta,
         checkpoints[0] = fused_now.copy()
 
     for round_i in range(1, n_rounds + 1):
-        # Step A: re-optimize RanSMAP alpha given current MLRan state, exact grid on the fused objective
         Xmoves = X_r0[:, None, :] + (T_mode - X_r0)[:, None, :] * ts[None, :, None]
         nll_r_grid = nll(gm_r, Xmoves.reshape(-1, X_r0.shape[1])).reshape(n, len(ts))
         sr_grid = minmax_norm(sr_tr, nll_r_grid.reshape(-1)).reshape(n, len(ts))
@@ -128,12 +113,17 @@ def coordinate_descent_joint(gm_m, sm_tr, X_m0, gm_r, sr_tr, X_r0, T_mode, meta,
         sr_now = sr_grid[np.arange(n), best_idx]
         fused_now = fused_grid[np.arange(n), best_idx]
 
-        # Step B: one candidate MLRan bit flip, accepted only if it improves the fused score
-        d = np.stack([np.sum((x_m - mus_m[k]) ** 2 / vars_m[k], axis=1) for k in range(K)], axis=1)
+        d = np.stack([
+            np.sum((x_m - mus_m[k]) ** 2 / vars_m[k], axis=1) for k in range(K)
+        ], axis=1)
         kstar = d.argmin(axis=1)
         mu_k, var_k = mus_m[kstar], vars_m[kstar]
         is_one = (x_m == 1) & (~flipped)
-        delta_local = np.where(is_one, (x_m - mu_k) ** 2 / var_k - (0.0 - mu_k) ** 2 / var_k, -np.inf)
+        delta_local = np.where(
+            is_one,
+            (x_m - mu_k) ** 2 / var_k - (0.0 - mu_k) ** 2 / var_k,
+            -np.inf,
+        )
         best_j = delta_local.argmax(axis=1)
         has_candidate = delta_local[np.arange(n), best_j] > -np.inf
 
@@ -154,45 +144,64 @@ def coordinate_descent_joint(gm_m, sm_tr, X_m0, gm_r, sr_tr, X_r0, T_mode, meta,
     return checkpoints, x_m, alpha
 
 
-res = {'description': __doc__.strip().split('\n')[0], 'n_rounds': N_ROUNDS,
-       'report_rounds': REPORT_ROUNDS, 'per_seed': {}}
+res = {
+    "description": __doc__.split("\n")[0],
+    "n_rounds": N_ROUNDS,
+    "report_rounds": REPORT_ROUNDS,
+    "per_seed": {},
+}
 agg = {r: [] for r in REPORT_ROUNDS}
 agg_flips_used = []
 
 for seed in SEEDS:
     rng_pair, rng_split, rng_meta, rng_join = (
-        np.random.default_rng(s) for s in np.random.SeedSequence(seed).spawn(4))
+        np.random.default_rng(s) for s in np.random.SeedSequence(seed).spawn(4)
+    )
 
-    tr_gids, te_gids = train_test_split(m_unique_gids, test_size=0.2, random_state=seed)
-    m_tr_mask = m_ben['_gid'].isin(set(tr_gids))
+    tr_gids, _ = train_test_split(m_unique_gids, test_size=TEST_SIZE, random_state=seed)
+    m_tr_mask = m_ben["_gid"].isin(set(tr_gids))
     Xmb_tr = m_ben[m_tr_mask][mfc].fillna(0.0).values
-    gm_m = fit_gm(Xmb_tr, n_components=K_MLRAN, covariance_type='diag', seed=seed)
+    gids_tr = m_ben[m_tr_mask]["_gid"].values
+    gm_m = fit_gm(Xmb_tr, n_components=K_MLRAN, covariance_type="diag", seed=seed)
     sm_tr = nll(gm_m, Xmb_tr)
 
+    # stratify + StandardScaler on RanSMAP benign train
     idx_b = np.where(is_benign_r)[0]
-    tr_b, te_b = train_test_split(idx_b, test_size=0.2, random_state=seed)
-    gm_r = GaussianMixture(K_RANSMAP, covariance_type=COV_RANSMAP, reg_covar=REG_COVAR,
-                           n_init=N_INIT, random_state=seed).fit(Xr[tr_b])
+    tr_b, te_b = train_test_split(
+        idx_b, test_size=TEST_SIZE, random_state=seed, stratify=fam_r[idx_b]
+    )
+    scaler_r = StandardScaler().fit(Xr_raw[tr_b])
+    Xr = scaler_r.transform(Xr_raw)
+    gm_r = GaussianMixture(
+        K_RANSMAP, covariance_type="full", reg_covar=REG_COVAR, n_init=N_INIT, random_state=seed
+    ).fit(Xr[tr_b])
     sr_tr = nll(gm_r, Xr[tr_b])
-    mus_r, covs_r = gm_r.means_, gm_r.covariances_
+    mus_r = gm_r.means_
 
     mal_idx = np.array([i for i in np.where(~is_benign_r)[0] if fam_r[i] in CANONICAL])
     Xrmal = Xr[mal_idx]
     fam_mal = fam_r[mal_idx]
-    kstar_r = mahal_to_centers_full(Xrmal, mus_r, covs_r).argmin(axis=1)
+    # Mahalanobis distance using gm_r.precisions_
+    kstar_r = mahal_sq_to_centers(Xrmal, gm_r).argmin(axis=1)
     T_mode = mus_r[kstar_r]
 
-    sm_ben_n_full = minmax_norm(sm_tr, nll(gm_m, m_ben[~m_tr_mask][mfc].fillna(0.0).values))
+    sm_ben_n_full = minmax_norm(
+        sm_tr, nll(gm_m, m_ben[~m_tr_mask][mfc].fillna(0.0).values)
+    )
     sr_ben_n_full = minmax_norm(sr_tr, nll(gm_r, Xr[te_b]))
 
-    sm_ben_calib, sm_ben_eval = split_half(sm_ben_n_full, rng_split)
-    sr_ben_calib, sr_ben_eval = split_half(sr_ben_n_full, rng_split)
-    n_calib_p = min(len(sm_ben_calib), len(sr_ben_calib))
-    pa_c, pb_c = pair(sm_ben_calib, sr_ben_calib, rng_meta, max(n_calib_p, 200))
-    meta = GaussianMixture(META_K, covariance_type='full', reg_covar=META_REG_COVAR,
-                           n_init=N_INIT, random_state=seed).fit(np.column_stack([pa_c, pb_c]))
+    # 5-fold OOF training calibration (n=600) + full 150 test evaluation
+    sm_oof = oof_benign_norm_scores_mlran(Xmb_tr, gids_tr, K_MLRAN, seed)
+    sr_oof = oof_benign_norm_scores_ransmap(
+        Xr_raw[tr_b], fam_r[tr_b], K_RANSMAP, seed, scale=True
+    )
+    n_calib_p = min(len(sm_oof), len(sr_oof))
+    pa_c, pb_c = pair_no_inflate(sm_oof, sr_oof, rng_meta, n_calib_p)
+    meta = GaussianMixture(
+        META_K, covariance_type="full", reg_covar=META_REG_COVAR, n_init=N_INIT, random_state=seed
+    ).fit(np.column_stack([pa_c, pb_c]))
 
-    n_eval_p = min(len(sm_ben_eval), len(sr_ben_eval))
+    n_eval_p = min(len(sm_ben_n_full), len(sr_ben_n_full))
 
     seed_out = {}
     for family in CANONICAL:
@@ -209,9 +218,10 @@ for seed in SEEDS:
         T_mode_paired = T_mode_f[ib]
 
         checkpoints, x_m_final, alpha_final = coordinate_descent_joint(
-            gm_m, sm_tr, X_m0, gm_r, sr_tr, X_r0, T_mode_paired, meta, N_ROUNDS, REPORT_ROUNDS)
+            gm_m, sm_tr, X_m0, gm_r, sr_tr, X_r0, T_mode_paired, meta, N_ROUNDS, REPORT_ROUNDS
+        )
 
-        pab, pbb = pair(sm_ben_eval, sr_ben_eval, rng_pair, n_eval_p)
+        pab, pbb = pair_no_inflate(sm_ben_n_full, sr_ben_n_full, rng_pair, n_eval_p)
         s_ben_meta = -meta.score_samples(np.column_stack([pab, pbb]))
         y = np.concatenate([np.zeros(n_eval_p), np.ones(n_pair)])
 
@@ -223,21 +233,26 @@ for seed in SEEDS:
 
         n_flips_used = float(np.mean(x_m_final != X_m0))
         agg_flips_used.append(n_flips_used)
-        seed_out[family] = {'auc_by_round': auc_by_round, 'mean_frac_bits_flipped': n_flips_used}
+        seed_out[family] = {
+            "auc_by_round": auc_by_round,
+            "mean_frac_bits_flipped": n_flips_used,
+        }
 
-    res['per_seed'][f'seed{seed}'] = seed_out
-    print(f"seed {seed}: " + " | ".join(
-        f"r{r}={np.mean([seed_out[f]['auc_by_round'][str(r)] for f in CANONICAL]):.4f}"
-        for r in REPORT_ROUNDS), flush=True)
+    res["per_seed"][f"seed{seed}"] = seed_out
+    print(
+        f"seed {seed}: "
+        + " | ".join(
+            f"r{r}={np.mean([seed_out[f]['auc_by_round'][str(r)] for f in CANONICAL]):.4f}"
+            for r in REPORT_ROUNDS
+        ),
+        flush=True,
+    )
 
-res['summary'] = {
-    'macro_auc_by_round': {str(r): float(np.mean(v)) for r, v in agg.items()},
-    'mean_frac_mlran_bits_flipped_at_final_round': float(np.mean(agg_flips_used)),
-    'v1_comparison_note': ('v1 (joint_channel_adversarial.py) static-heuristic joint optimum was macro '
-                            'AUC=0.326 (non-monotonic in bit-budget, worst at budget~20); this v2 coordinate-descent '
-                            'result at the final round is the number to compare it against.'),
+res["summary"] = {
+    "macro_auc_by_round": {str(r): float(np.mean(v)) for r, v in agg.items()},
+    "mean_frac_mlran_bits_flipped_at_final_round": float(np.mean(agg_flips_used)),
 }
-with open(OUT, 'w') as f:
-    json.dump(res, f, indent=1)
-print(json.dumps(res['summary'], indent=1))
-print('saved ->', OUT)
+with open(OUT, "w") as f:
+    json.dump(res, f, indent=2)
+print(json.dumps(res["summary"], indent=2))
+print("saved ->", OUT)

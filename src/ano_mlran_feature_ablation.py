@@ -5,7 +5,7 @@ Same GMM(K=3, diag) + group-based-split + 5-family-LOFO protocol as the
 other MLRan-channel results.
 """
 
-from config import MLRAN_CSV, RESULTS_DIR, SEEDS, CANONICAL_FAMILIES, K_MLRAN  # noqa: E402
+from config import CANONICAL_FAMILIES, K_MLRAN, MLRAN_CSV, RESULTS_DIR, SEEDS, TEST_SIZE  # noqa: E402
 import hashlib
 import json
 import numpy as np
@@ -20,8 +20,7 @@ from utils import fit_gm
 MLRAN_PATH = MLRAN_CSV
 OUTPUT_DIR = RESULTS_DIR
 MLRAN_EXCLUDE = {"label", "family", "sample_id", "sha256", "split", "STRING:labels", "dataset"}
-MLRAN_FAMILY_MAP = {"Conti": "conti", "Ryuk": "ryuk", "LockBit": "lockbit",
-                     "REvil": "revil", "WannaCry": "wannacry"}
+MLRAN_FAMILY_MAP = {f: f.lower() for f in CANONICAL_FAMILIES}
 
 
 def score(gm, X):
@@ -53,7 +52,7 @@ def main():
         m_unique_gids = np.unique(m_gids)
 
         for seed in SEEDS:
-            tr_gids, te_gids = train_test_split(m_unique_gids, test_size=0.2, random_state=seed)
+            tr_gids, te_gids = train_test_split(m_unique_gids, test_size=TEST_SIZE, random_state=seed)
             m_tr_mask = m_ben["_gid"].isin(set(tr_gids))
             Xtr = m_ben[m_tr_mask][cols].fillna(0.0).values
             Xte = m_ben[~m_tr_mask][cols].fillna(0.0).values

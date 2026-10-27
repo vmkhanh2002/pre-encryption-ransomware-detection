@@ -15,7 +15,6 @@ every default:
     PERD_RANSMAP_CSV   processed RanSMAP feature table
     PERD_RESULTS_DIR   where result JSON files are written and read
     PERD_FIGURES_DIR   where figures are written
-    RANSMAP_RAW_DIR    raw RanSMAP trace directory (feature extraction only)
     RANSMAP_KAGGLE_ZIP raw RanSMAP Kaggle archive (feature extraction only)
 """
 import json
@@ -45,15 +44,6 @@ MLRAN_CSV = _env_path("PERD_MLRAN_CSV", DATA_DIR / "mlran_analysis_features.csv"
 RANSMAP_CSV = _env_path("PERD_RANSMAP_CSV", DATA_DIR / "ransmap_analysis_features.csv")
 RESULTS_DIR = _env_path("PERD_RESULTS_DIR", REPO_ROOT / "experiments" / "ano_baseline")
 FIGURES_DIR = _env_path("PERD_FIGURES_DIR", REPO_ROOT / "figures")
-
-
-def ransmap_raw_dir():
-    """Raw RanSMAP trace directory; required only by feature extraction."""
-    value = os.environ.get("RANSMAP_RAW_DIR")
-    if not value:
-        raise SystemExit("Set RANSMAP_RAW_DIR to the extracted RanSMAP trace directory "
-                         "(e.g. .../RanSMAP/dataset/original/i3-gen12/ddr4-2133-16g).")
-    return Path(value).expanduser().resolve()
 
 
 def ransmap_kaggle_zip():
@@ -97,6 +87,19 @@ def load_result(name):
         return json.load(f)
 
 
-def selected_meta_k():
-    """Meta-GMM component count chosen by calibration-half BIC in learned_fusion.py."""
-    return int(load_result("learned_fusion.json")["meta_k_selection"]["selected_k"])
+def selected_meta_k(variant="oof"):
+    """Meta-GMM component count chosen by BIC in learned_fusion.py.
+
+    variant="oof": calibration on out-of-fold benign training scores (used by
+    the adversarial experiments); variant="split75": calibration on half of
+    the benign test pool (paper, Table 3).
+    """
+    sel = load_result("learned_fusion.json")["meta_k_selection"]
+    key = {"oof": "selected_k", "split75": "selected_k_split75_noreplace"}[variant]
+    return int(sel[key])
+
+
+def fused_result_key(variant="split75"):
+    """Key of the fused system in learned_fusion.json for a calibration variant."""
+    k = selected_meta_k(variant)
+    return f"meta_K{k}" if variant == "oof" else f"meta_K{k}_split75_noreplace"

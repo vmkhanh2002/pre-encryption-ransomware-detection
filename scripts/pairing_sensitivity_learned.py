@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(next(p / "src" for p in Path(__file__).resolve().parents
                             if (p / "src" / "config.py").is_file())))
-from config import MLRAN_CSV, RANSMAP_CSV, RESULTS_DIR, SEEDS, CANONICAL_FAMILIES, K_MLRAN, K_RANSMAP, N_INIT, META_REG_COVAR, selected_meta_k  # noqa: E402
+from config import CANONICAL_FAMILIES, K_MLRAN, K_RANSMAP, META_REG_COVAR, MLRAN_CSV, N_INIT, RANSMAP_CSV, RESULTS_DIR, SEEDS, TEST_SIZE, selected_meta_k  # noqa: E402
 
 import hashlib
 import json
@@ -34,21 +34,18 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
-from utils import fit_gm, minmax_norm
+from utils import MLRAN_EXCLUDE, fit_gm, load_ransmap_clean, minmax_norm
 
 N_PAIRINGS = 100
-META_K = selected_meta_k()
+META_K = selected_meta_k("split75")  # same calibration protocol as Table 3
 
 
 MLRAN_PATH = MLRAN_CSV
 RANSMAP_PATH = RANSMAP_CSV
 OUTPUT_DIR = RESULTS_DIR
 
-MLRAN_EXCLUDE = {"label", "family", "sample_id", "sha256", "split", "STRING:labels", "dataset"}
-RANSMAP_EXCLUDE = {"label", "family", "trace_path", "dataset"}
-
-MLRAN_FAMILY_MAP = {"Conti": "conti", "Ryuk": "ryuk", "LockBit": "lockbit", "REvil": "revil", "WannaCry": "wannacry"}
-RANSMAP_FAMILY_MAP = {"Conti": "Conti", "Ryuk": "Ryuk", "LockBit": "LockBit", "REvil": "REvil", "WannaCry": "WannaCry"}
+MLRAN_FAMILY_MAP = {f: f.lower() for f in CANONICAL_FAMILIES}
+RANSMAP_FAMILY_MAP = {f: f for f in CANONICAL_FAMILIES}
 
 
 def split_half(arr, rng):
@@ -73,9 +70,7 @@ def main():
              for f, a in MLRAN_FAMILY_MAP.items()}
 
     print("Loading RanSMAP...")
-    ransmap = pd.read_csv(RANSMAP_PATH)
-    num_cols = set(ransmap.select_dtypes(include="number").columns)
-    rfc = [c for c in ransmap.columns if c in num_cols and c not in RANSMAP_EXCLUDE]
+    ransmap, rfc = load_ransmap_clean()
     r_ben = ransmap[ransmap["label"] == 0].reset_index(drop=True)
     r_mal = {f: ransmap[ransmap["family"] == a][rfc].fillna(0.0).values
               for f, a in RANSMAP_FAMILY_MAP.items()}
@@ -87,13 +82,13 @@ def main():
         rng_pair, rng_split, rng_meta = (np.random.default_rng(s)
                                           for s in np.random.SeedSequence(seed).spawn(3))
 
-        tr_gids, _ = train_test_split(unique_gids, test_size=0.2, random_state=seed)
+        tr_gids, _ = train_test_split(unique_gids, test_size=TEST_SIZE, random_state=seed)
         mask = m_ben["_gid"].isin(set(tr_gids))
         Xmb_tr = m_ben[mask][mfc].fillna(0.0).values
         Xmb_te = m_ben[~mask][mfc].fillna(0.0).values
 
         Xrb_tr_raw, Xrb_te_raw = train_test_split(
-            r_ben[rfc].fillna(0.0).values, test_size=0.2,
+            r_ben[rfc].fillna(0.0).values, test_size=TEST_SIZE,
             random_state=seed, stratify=r_ben["family"].values,
         )
         sc = StandardScaler().fit(Xrb_tr_raw)
@@ -114,13 +109,13 @@ def main():
         sm_ben_calib, sm_ben_eval = split_half(sm_ben_te, rng_split)
         sr_ben_calib, sr_ben_eval = split_half(sr_ben_te, rng_split)
 
-        # Fit the meta-GMM ONCE per seed, on a calibration-half bootstrap
-        # pairing, then hold it fixed while varying the pairing draw below.
-        # This isolates pairing variance from meta-model-fit variance,
-        # exactly as the original script holds gm_m/gm_r fixed per seed.
+        # Fit the meta-GMM once per seed on a calibration-half pairing (each
+        # calibration score used at most once), then hold it fixed while the
+        # evaluation pairing is redrawn below. This isolates pairing variance
+        # from meta-model-fit variance.
         n_calib_p = min(len(sm_ben_calib), len(sr_ben_calib))
-        ia = rng_meta.choice(len(sm_ben_calib), max(n_calib_p, 200), replace=(len(sm_ben_calib) < 200))
-        ib = rng_meta.choice(len(sr_ben_calib), max(n_calib_p, 200), replace=(len(sr_ben_calib) < 200))
+        ia = rng_meta.choice(len(sm_ben_calib), n_calib_p, replace=False)
+        ib = rng_meta.choice(len(sr_ben_calib), n_calib_p, replace=False)
         meta = GaussianMixture(META_K, covariance_type='full', reg_covar=META_REG_COVAR,
                                 n_init=N_INIT, random_state=seed).fit(
             np.column_stack([sm_ben_calib[ia], sr_ben_calib[ib]]))
@@ -195,14 +190,7 @@ def main():
     out_path = OUTPUT_DIR / "pairing_sensitivity_learned.json"
     with open(out_path, "w") as f:
         json.dump({
-            "description": (
-                "Bootstrap pairing sensitivity for B_learned: for each seed "
-                "(fixed per-channel GMMs + train/test split + one meta-GMM "
-                f"fit on a calibration-half pairing), run {N_PAIRINGS} random "
-                "bootstrap pairings of the eval-half benign scores and "
-                "malware scores. Report within-seed std (pairing variance) "
-                "vs between-seed std (model variance)."
-            ),
+            "description": __doc__.split("\n")[0],
             "n_seeds": len(SEEDS),
             "n_pairings_per_seed": N_PAIRINGS,
             "strategy": "B_learned",
