@@ -1,0 +1,48 @@
+cff-version: 1.2.0
+message: "If you use this software or its findings, please cite the paper below."
+title: "Benign-Only Ransomware Detection via Dual-Channel Behavioral Anomaly Fusion: A Feasibility Study"
+abstract: >-
+  Code for a feasibility study of benign-only, dual-channel ransomware
+  anomaly detection. Two Gaussian Mixture Models trained on benign data
+  only (sandbox API/static-artifact features and hypervisor block-I/O
+  metrics) are fused by a learned density model over bootstrap-paired
+  benign scores. Fusion is not an accuracy gain on the saturated
+  benchmark; under attack it degrades gracefully when one channel is
+  compromised and fails when both are (AUC 0.326).
+type: software
+authors:
+  - family-names: Vu
+    given-names: Minh Khanh
+    affiliation: "Independent Researcher"
+    email: vuminhkhanh102002@gmail.com
+  - family-names: Vu
+    given-names: Duc Ly
+    affiliation: "Thu Dau Mot University, Viet Nam"
+    email: lyvd@tdmu.edu.vn
+date-released: "2026-10-27"
+license: MIT
+repository-code: "https://github.com/vmkhanh2002/pre-encryption-ransomware-detection"
+keywords:
+  - ransomware detection
+  - anomaly detection
+  - behavioral analysis
+  - learned score fusion
+  - benign-only training
+  - adversarial robustness
+preferred-citation:
+  type: conference-paper
+  title: "Benign-Only Ransomware Detection via Dual-Channel Behavioral Anomaly Fusion: A Feasibility Study"
+  authors:
+    - family-names: Vu
+      given-names: Minh Khanh
+      affiliation: "Independent Researcher"
+    - family-names: Nguyen
+      given-names: Thanh Phuong
+      affiliation: "Thu Dau Mot University, Viet Nam"
+    - family-names: Vu
+      given-names: Duc Ly
+      affiliation: "Thu Dau Mot University, Viet Nam"
+  year: 2026
+  collection-title: "SOICT 2026"
+  publisher:
+    name: "Springer"

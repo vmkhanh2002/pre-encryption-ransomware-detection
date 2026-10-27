@@ -1,0 +1,9 @@
+# PERD Fusion System: pinned dependencies
+# Environment used to produce the reported results. Python 3.11.
+# GMM/anomaly results are stable across scikit-learn 1.4--1.8 (verified: identical
+# AUC/AUPRC/TPR/MCC), so newer 1.x patch releases reproduce the paper numbers.
+numpy>=2.0,<3.0
+pandas>=2.0,<3.1
+scikit-learn>=1.4,<1.9
+scipy>=1.11,<1.18
+matplotlib>=3.5,<4.0   # scripts/generate_figures.py only

@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Datasets (licensed by their owners, see data/processed/README.md)
+data/processed/*.csv
+data/external/
+
+# Generated outputs (recreate with the scripts, see README.md)
+experiments/
+figures/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
